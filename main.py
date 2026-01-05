@@ -1,5 +1,4 @@
 import os
-import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
@@ -13,16 +12,12 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📊 Analiz edilir...\n⏳ Bir neçə saniyə gözlə"
     )
 
-async def main():
-    # ApplicationBuilder tam async və Updater-i gizlədir
+def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    
-    # Komandaları əlavə edin
     app.add_handler(CommandHandler("today", today))
-    
+
     print("✅ Bot polling started")
-    # Async polling
-    await app.run_polling()
+    app.run_polling()   # ❗ await YOX, asyncio YOX
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
