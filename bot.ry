@@ -2,7 +2,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import os
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = "8531904636:AAFEheE7iq_4uUhzZcLomBOlUUVHzVpMT_E"
 USER_ID = int(os.getenv("USER_ID"))
 
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
