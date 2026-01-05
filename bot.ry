@@ -1,8 +1,9 @@
+import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import os
 
-BOT_TOKEN = "8531904636:AAFEheE7iq_4uUhzZcLomBOlUUVHzVpMT_E"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 USER_ID = int(os.getenv("USER_ID"))
 
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -12,10 +13,12 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📊 Analiz edilir...\n⏳ Bir neçə saniyə gözlə"
     )
 
-def main():
+async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("today", today))
-    app.run_polling()
+    print("✅ Bot polling started")
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
