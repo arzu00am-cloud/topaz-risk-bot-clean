@@ -15,7 +15,7 @@ async def async_get(session, url):
 
 # Real data: fixtures, then statistics
 async def fetch_fixtures():
-    url = f"https://v3.football.api-sports.io/fixtures?date={date.today()}"
+    url = f"https://v3.football.api-sports.io/fixtures?date={today}"
     headers = {"x-apisports-key": API_KEY}
     async with aiohttp.ClientSession(headers=headers) as session:
         data, status = await async_get(session, url)
