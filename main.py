@@ -1,108 +1,117 @@
 import os
-import aiohttp
+import requests
+from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from datetime import datetime, timedelta
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-USER_ID = int(os.getenv("USER_ID"))
 API_KEY = os.getenv("API_FOOTBALL_KEY")
-
-# ===== TARİX (Bakı vaxtı) =====
-TODAY = (datetime.utcnow() + timedelta(hours=4)).strftime("%Y-%m-%d")
+USER_ID = int(os.getenv("USER_ID"))
 
 HEADERS = {
     "x-apisports-key": API_KEY
 }
 
-# ===== FUTBOL OYUNLARI =====
-async def fetch_football():
-    url = f"https://v3.football.api-sports.io/fixtures?date={TODAY}"
-    async with aiohttp.ClientSession(headers=HEADERS) as session:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                return []
-            data = await resp.json()
-            return data.get("response", [])
+# Bakı vaxtı
+NOW = datetime.utcnow() + timedelta(hours=4)
+TODAY = NOW.strftime("%Y-%m-%d")
+TOMORROW = (NOW + timedelta(days=1)).strftime("%Y-%m-%d")
 
-# ===== BASKETBOL OYUNLARI =====
-async def fetch_basketball():
-    url = f"https://v1.basketball.api-sports.io/games?date={TODAY}"
-    async with aiohttp.ClientSession(headers=HEADERS) as session:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                return []
-            data = await resp.json()
-            return data.get("response", [])
 
-# ===== /today KOMANDASI =====
+def get_fixtures():
+    url = f"https://v3.football.api-sports.io/fixtures?from={TODAY}&to={TOMORROW}&status=NS"
+    r = requests.get(url, headers=HEADERS, timeout=15)
+    if r.status_code != 200:
+        return []
+    return r.json().get("response", [])
+
+
+def analyze_game(game):
+    home_id = game["teams"]["home"]["id"]
+    away_id = game["teams"]["away"]["id"]
+    league_id = game["league"]["id"]
+
+    stats_url = (
+        f"https://v3.football.api-sports.io/teams/statistics"
+        f"?league={league_id}&season={NOW.year}&team={home_id}"
+    )
+
+    r = requests.get(stats_url, headers=HEADERS, timeout=15)
+    if r.status_code != 200:
+        return None
+
+    data = r.json().get("response")
+    if not data:
+        return None
+
+    win_rate = data["fixtures"]["wins"]["total"]
+    played = data["fixtures"]["played"]["total"]
+
+    if played == 0:
+        return None
+
+    probability = int((win_rate / played) * 100)
+
+    # sadə koeffisient modeli
+    odds = round(1.3 + (100 - probability) / 100, 2)
+
+    if odds < 1.30:
+        return None
+
+    return probability, odds
+
+
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != USER_ID:
         return
 
-    await update.message.reply_text("📊 Analiz edilir...\n⏳ Bir neçə saniyə gözlə")
+    await update.message.reply_text(
+        "📊 Analiz edilir...\n⏳ Real oyunlar yoxlanılır"
+    )
 
-    football_games = await fetch_football()
-    basketball_games = await fetch_basketball()
-
+    fixtures = get_fixtures()
     results = []
 
-    # --- FUTBOL ANALİZ ---
-    for g in football_games:
-        home = g["teams"]["home"]["name"]
-        away = g["teams"]["away"]["name"]
-        league = g["league"]["name"]
-
-        # sadə real filtr (başlamamış oyunlar)
-        if g["fixture"]["status"]["short"] != "NS":
+    for game in fixtures:
+        analysis = analyze_game(game)
+        if not analysis:
             continue
 
-        probability = 75  # konservativ başlanğıc
-        odds = 1.4        # minimumdan yuxarı
+        probability, odds = analysis
 
-        results.append((
-            probability,
-            odds,
-            f"⚽ {league}: {home} vs {away}"
-        ))
-
-    # --- BASKETBOL ANALİZ ---
-    for b in basketball_games:
-        home = b["teams"]["home"]["name"]
-        away = b["teams"]["away"]["name"]
-        league = b["league"]["name"]
-
-        if b["status"]["short"] != "NS":
-            continue
-
-        probability = 74
-        odds = 1.35
-
-        results.append((
-            probability,
-            odds,
-            f"🏀 {league}: {home} vs {away}"
-        ))
+        results.append({
+            "league": game["league"]["name"],
+            "home": game["teams"]["home"]["name"],
+            "away": game["teams"]["away"]["name"],
+            "prob": probability,
+            "odds": odds
+        })
 
     if not results:
-        await update.message.reply_text("⚠️ Bugün uyğun oyun tapılmadı.")
+        await update.message.reply_text("❌ Yaxın 24 saat üçün uyğun oyun tapılmadı")
         return
 
-    # Ən yüksək ehtimala görə sırala
-    results.sort(key=lambda x: x[0], reverse=True)
+    results.sort(key=lambda x: x["prob"], reverse=True)
     top3 = results[:3]
 
-    msg = "⚽🏀 Bugünkü ən uğurlu 3 oyun:\n\n"
-    for prob, odds, text in top3:
-        msg += f"{text}\nEhtimal: {prob}% | Bet koeffisienti: {odds}\n\n"
+    msg = "⚽ Yaxın 24 saat üçün ƏN UĞURLU 3 OYUN:\n\n"
+
+    for g in top3:
+        msg += (
+            f"{g['league']}:\n"
+            f"{g['home']} vs {g['away']}\n"
+            f"Uğurlu olma ehtimalı: {g['prob']}%\n"
+            f"Bet koeffisienti: {g['odds']}\n\n"
+        )
 
     await update.message.reply_text(msg)
 
-# ===== MAIN =====
+
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("today", today))
     app.run_polling(drop_pending_updates=True)
+
 
 if __name__ == "__main__":
     main()
