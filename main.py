@@ -1,5 +1,6 @@
 import os
-import requests
+import aiohttp
+import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from datetime import date
@@ -8,25 +9,33 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 USER_ID = int(os.getenv("USER_ID"))
 API_KEY = os.getenv("API_FOOTBALL_KEY")
 
+async def fetch_fixtures():
+    url = f"https://v3.football.api-sports.io/fixtures?date={date.today()}"
+    headers = {"x-apisports-key": API_KEY}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as response:
+            if response.status != 200:
+                return None, response.status
+            data = await response.json()
+            return data.get("response", []), 200
+
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != USER_ID:
         return
 
     await update.message.reply_text("📊 Analiz edilir...\n⏳ Bir neçə saniyə gözlə")
 
-    # 1️⃣ API-dən bugünkü futbol oyunlarını çəkmək
-    url = f"https://v3.football.api-sports.io/fixtures?date={date.today()}"
-    headers = {"x-apisports-key": API_KEY}
-    r = requests.get(url, headers=headers)
-
-    if r.status_code != 200:
-        await update.message.reply_text(f"❌ API xətası: {r.status_code}")
+    fixtures, status = await fetch_fixtures()
+    if fixtures is None:
+        await update.message.reply_text(f"❌ API xətası: {status}")
         return
 
-    data = r.json()["response"]
+    if not fixtures:
+        await update.message.reply_text("⚠️ Bugün oyun tapılmadı.")
+        return
 
-    # 2️⃣ Sadəcə top 3 oyun
-    top_games = data[:3]  # sadə, hələ statistik analiz əlavə olunmayıb
+    # TOP 3 oyun
+    top_games = fixtures[:3]
 
     msg = "⚽ Bugünkü TOP 3 futbol oyunları:\n\n"
     for g in top_games:
@@ -43,4 +52,4 @@ def main():
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    main()test_api()
+    main()
