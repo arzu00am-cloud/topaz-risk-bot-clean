@@ -21,3 +21,17 @@ def main():
 
 if __name__ == "__main__":
     main()
+import requests
+import os
+
+API_KEY = os.getenv("API_FOOTBALL_KEY")
+
+def test_api():
+    url = "https://v3.football.api-sports.io/fixtures?date=2024-01-06"
+    headers = {
+        "x-apisports-key": API_KEY
+    }
+    r = requests.get(url, headers=headers)
+    print("API STATUS:", r.status_code)
+
+test_api()
