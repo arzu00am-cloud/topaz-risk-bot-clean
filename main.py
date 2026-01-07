@@ -7,15 +7,13 @@ from datetime import datetime, timedelta
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_FOOTBALL_KEY")
 
-HEADERS = {
-    "x-apisports-key": API_KEY
-}
+HEADERS = {"x-apisports-key": API_KEY}
 
 FIXTURES_URL = "https://v3.football.api-sports.io/fixtures"
 STATS_URL = "https://v3.football.api-sports.io/teams/statistics"
 
-# ================= ANALIZ =================
-def calculate_probability(team_id, league_id, season):
+
+def team_win_rate(team_id, league_id, season):
     r = requests.get(
         STATS_URL,
         headers=HEADERS,
@@ -33,25 +31,26 @@ def calculate_probability(team_id, league_id, season):
     if not data:
         return 50
 
-    wins = data["fixtures"]["wins"]["total"]
     played = data["fixtures"]["played"]["total"]
+    wins = data["fixtures"]["wins"]["total"]
 
     if played == 0:
         return 50
 
-    win_rate = (wins / played) * 100
-    return min(int(win_rate), 85)
+    return min(int((wins / played) * 100), 85)
 
-def get_best_games():
-    from_date = datetime.utcnow()
-    to_date = from_date + timedelta(days=2)
+
+def get_games():
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    future = (datetime.utcnow() + timedelta(days=2)).strftime("%Y-%m-%d")
 
     r = requests.get(
         FIXTURES_URL,
         headers=HEADERS,
         params={
-            "from": from_date.strftime("%Y-%m-%d"),
-            "to": to_date.strftime("%Y-%m-%d")
+            "from": today,
+            "to": future,
+            "status": "NS"
         }
     )
 
@@ -67,27 +66,30 @@ def get_best_games():
         home = g["teams"]["home"]
         away = g["teams"]["away"]
 
-        home_prob = calculate_probability(home["id"], league_id, season)
-        away_prob = calculate_probability(away["id"], league_id, season)
+        home_p = team_win_rate(home["id"], league_id, season)
+        away_p = team_win_rate(away["id"], league_id, season)
 
-        best_prob = max(home_prob, away_prob)
+        best = max(home_p, away_p)
+
+        if best < 60:
+            continue
 
         games.append({
             "league": g["league"]["name"],
             "match": f"{home['name']} vs {away['name']}",
-            "prob": best_prob
+            "prob": best
         })
 
     games.sort(key=lambda x: x["prob"], reverse=True)
     return games[:3]
 
-# ================= TELEGRAM =================
+
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📊 Real analiz edilir...\n⏳ Bir neçə saniyə gözlə"
     )
 
-    games = get_best_games()
+    games = get_games()
 
     if not games:
         await update.message.reply_text(
@@ -106,11 +108,12 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg)
 
-# ================= START =================
+
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("today", today))
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
