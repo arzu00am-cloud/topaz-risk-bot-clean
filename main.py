@@ -32,6 +32,17 @@ def debug_print(*args):
     """Debug mesajları için"""
     print(f"[DEBUG] {datetime.now().strftime('%H:%M:%S')}:", *args)
 
+def get_current_season():
+    """Avtomatik mövsüm hesablanması"""
+    now = datetime.now()
+    current_year = now.year
+    current_month = now.month
+    
+    if current_month >= 8:  # Avqust və sonrası
+        return current_year
+    else:
+        return current_year - 1
+
 def fetch_team_stats(team_id, league_id, season):
     """Takım istatistiklerini al"""
     cache_key = f"{team_id}_{league_id}_{season}"
@@ -79,14 +90,16 @@ def get_top_games():
     now = datetime.utcnow()
     start_date = now.strftime("%Y-%m-%d")
     end_date = (now + timedelta(days=2)).strftime("%Y-%m-%d")
+    current_season = get_current_season()  # ƏLAVƏ EDİLDİ
     
-    debug_print(f"Tarih aralığı: {start_date} - {end_date}")
+    debug_print(f"Tarih aralığı: {start_date} - {end_date}, Mövsüm: {current_season}")
     
     params = {
         "from": start_date,
         "to": end_date,
         "status": "NS",
-        "timezone": "Europe/Istanbul"
+        "timezone": "Europe/Istanbul",
+        "season": current_season  # ƏLAVƏ EDİLDİ
     }
     
     try:
@@ -255,7 +268,14 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     debug_print("Test komutu çalıştı")
     
-    test_params = {"date": datetime.utcnow().strftime("%Y-%m-%d"), "league": 39}
+    # AVTOMATİK mövsüm hesablanması
+    season = get_current_season()  # YENİ FUNKSİYA İSTİFADƏ EDİLDİ
+    
+    test_params = {
+        "date": datetime.utcnow().strftime("%Y-%m-%d"),
+        "league": 39,  # Premier League
+        "season": season  # ƏLAVƏ EDİLDİ
+    }
     
     try:
         r = requests.get(FIXTURES_URL, headers=HEADERS, params=test_params, timeout=10)
@@ -265,7 +285,8 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if "errors" in data and data["errors"]:
                 api_status = f"❌ API Error: {data['errors']}"
             else:
-                api_status = "✅ API Bağlantısı Çalışıyor"
+                matches_found = len(data.get("response", []))
+                api_status = f"✅ API Bağlantısı Çalışıyor. {matches_found} maç bulundu."
         elif r.status_code == 429:
             api_status = "❌ API Limiti Aşıldı"
         elif r.status_code == 403:
@@ -277,7 +298,8 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🔍 API Test Sonucu\n\n"
             f"• Status Code: {r.status_code}\n"
             f"• API Durumu: {api_status}\n"
-            f"• Bot Token: {'✅ Mevcut' if BOT_TOKEN else '❌ Eksik'}\n"
+            f"• Təyin edilmiş Mövsüm: {season}\n"
+            f"• Bot Token: {'✅ Mövcud' if BOT_TOKEN else '❌ Eksik'}\n"
             f"• USER_ID: {'✅ ' + str(USER_ID) if USER_ID_STR else '❌ Eksik'}\n"
             f"• Zaman: {datetime.now().strftime('%H:%M:%S')}\n\n"
             f"API Key ilk 10 karakter: {API_KEY[:10] if API_KEY else 'EKSİK'}..."
