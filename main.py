@@ -1,40 +1,116 @@
-import asyncio
-import aiohttp
-from datetime import datetime, timedelta
+import os
+import requests
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from datetime import datetime, timedelta
 
-# ================== AYARLAR ==================
-TELEGRAM_TOKEN = "BURAYA_TELEGRAM_BOT_TOKEN"
-API_FOOTBALL_KEY = "BURAYA_API_FOOTBALL_KEY"
-
-API_FOOTBALL_URL = "https://v3.football.api-sports.io/fixtures"
-ODDS_URL = "https://v3.football.api-sports.io/odds"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_KEY = os.getenv("API_FOOTBALL_KEY")
 
 HEADERS = {
-    "x-apisports-key": API_FOOTBALL_KEY
+    "x-apisports-key": API_KEY
 }
 
-TODAY = datetime.utcnow().strftime("%Y-%m-%d")
-TOMORROW = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d")
+FIXTURES_URL = "https://v3.football.api-sports.io/fixtures"
+STATS_URL = "https://v3.football.api-sports.io/teams/statistics"
 
-MIN_ODD = 1.30
+# ================= ANALIZ =================
+def calculate_probability(team_id, league_id, season):
+    r = requests.get(
+        STATS_URL,
+        headers=HEADERS,
+        params={
+            "team": team_id,
+            "league": league_id,
+            "season": season
+        }
+    )
 
-# ================== FUTBOL DATA ==================
-async def fetch_football():
+    if r.status_code != 200:
+        return 50
+
+    data = r.json().get("response")
+    if not data:
+        return 50
+
+    wins = data["fixtures"]["wins"]["total"]
+    played = data["fixtures"]["played"]["total"]
+
+    if played == 0:
+        return 50
+
+    win_rate = (wins / played) * 100
+    return min(int(win_rate), 85)
+
+def get_best_games():
+    from_date = datetime.utcnow()
+    to_date = from_date + timedelta(days=2)
+
+    r = requests.get(
+        FIXTURES_URL,
+        headers=HEADERS,
+        params={
+            "from": from_date.strftime("%Y-%m-%d"),
+            "to": to_date.strftime("%Y-%m-%d")
+        }
+    )
+
+    if r.status_code != 200:
+        return []
+
     games = []
 
-    async with aiohttp.ClientSession(headers=HEADERS) as session:
-        async with session.get(
-            API_FOOTBALL_URL,
-            params={"from": TODAY, "to": TOMORROW, "status": "NS"}
-        ) as resp:
-            data = await resp.json()
+    for g in r.json().get("response", []):
+        league_id = g["league"]["id"]
+        season = g["league"]["season"]
 
-        for g in data.get("response", []):
-            fixture_id = g["fixture"]["id"]
-            league = g["league"]["name"]
-            home = g["teams"]["home"]["name"]
-            away = g["teams"]["away"]["name"]
+        home = g["teams"]["home"]
+        away = g["teams"]["away"]
 
-            # ODDS
+        home_prob = calculate_probability(home["id"], league_id, season)
+        away_prob = calculate_probability(away["id"], league_id, season)
+
+        best_prob = max(home_prob, away_prob)
+
+        games.append({
+            "league": g["league"]["name"],
+            "match": f"{home['name']} vs {away['name']}",
+            "prob": best_prob
+        })
+
+    games.sort(key=lambda x: x["prob"], reverse=True)
+    return games[:3]
+
+# ================= TELEGRAM =================
+async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📊 Real analiz edilir...\n⏳ Bir neçə saniyə gözlə"
+    )
+
+    games = get_best_games()
+
+    if not games:
+        await update.message.reply_text(
+            "❌ Yaxın 48 saat üçün uyğun real oyun tapılmadı"
+        )
+        return
+
+    msg = "⚽ Bugünkü ƏN UĞURLU 3 OYUN:\n\n"
+
+    for g in games:
+        msg += (
+            f"{g['league']}\n"
+            f"{g['match']}\n"
+            f"Uğurlu olma ehtimalı: {g['prob']}%\n\n"
+        )
+
+    await update.message.reply_text(msg)
+
+# ================= START =================
+def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("today", today))
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
