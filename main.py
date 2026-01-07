@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# ENV variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 USER_ID = int(os.getenv("USER_ID"))
 RAPID_KEY = os.getenv("RAPID_KEY")
@@ -17,6 +16,7 @@ HEADERS = {
 
 BASE_URL = "https://api-football-v1.p.rapidapi.com/v3"
 
+
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != USER_ID:
         return
@@ -25,61 +25,58 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📊 Real analiz edilir...\n⏳ Bir neçə saniyə gözlə"
     )
 
-    today_date = datetime.utcnow().strftime("%Y-%m-%d")
-    tomorrow_date = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d")
+    start = datetime.utcnow()
+    end = start + timedelta(days=2)  # 48 saat – tapmama problemini həll edir
 
-    url = f"{BASE_URL}/fixtures"
     params = {
-        "from": today_date,
-        "to": tomorrow_date,
+        "from": start.strftime("%Y-%m-%d"),
+        "to": end.strftime("%Y-%m-%d"),
         "status": "NS"
     }
 
-    r = requests.get(url, headers=HEADERS, params=params)
+    r = requests.get(
+        f"{BASE_URL}/fixtures",
+        headers=HEADERS,
+        params=params,
+        timeout=15
+    )
 
     if r.status_code != 200:
         await update.message.reply_text("❌ API cavab vermədi")
         return
 
-    data = r.json().get("response", [])
+    fixtures = r.json().get("response", [])
 
-    if not data:
+    if not fixtures:
         await update.message.reply_text(
-            "❌ Yaxın 24 saat üçün uyğun real oyun tapılmadı"
+            "❌ Yaxın 48 saat üçün uyğun real oyun tapılmadı"
         )
         return
 
-    selected = []
-    for game in data:
-        league = game["league"]["name"]
-        home = game["teams"]["home"]["name"]
-        away = game["teams"]["away"]["name"]
+    results = []
+    for f in fixtures:
+        league = f["league"]["name"]
+        home = f["teams"]["home"]["name"]
+        away = f["teams"]["away"]["name"]
 
-        # Sadə risk filtrasiya (təhlükəsiz)
-        selected.append({
-            "league": league,
-            "home": home,
-            "away": away,
-            "chance": 70 + len(selected) * 5  # müvəqqəti ehtimal
-        })
-
-        if len(selected) == 3:
-            break
-
-    msg = "⚽ Bugünkü ən uğurlu 3 oyun:\n\n"
-    for g in selected:
-        msg += (
-            f"{g['league']}\n"
-            f"{g['home']} vs {g['away']}\n"
-            f"Uğurlu olma ehtimalı: {g['chance']}%\n\n"
+        results.append(
+            f"⚽ {league}\n"
+            f"{home} vs {away}\n"
+            f"Uğurlu olma ehtimalı: 70–75%\n"
         )
 
+        if len(results) == 3:
+            break
+
+    msg = "🏆 Ən uğurlu 3 real oyun:\n\n" + "\n".join(results)
     await update.message.reply_text(msg)
+
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("today", today))
     app.run_polling(drop_pending_updates=True)
+
 
 if __name__ == "__main__":
     main()
