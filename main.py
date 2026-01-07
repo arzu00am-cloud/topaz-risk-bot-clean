@@ -41,19 +41,16 @@ def fetch_team_stats(team_id, league_id, season):
         r = requests.get(STATS_URL, headers=HEADERS, params=params, timeout=10)
         
         if r.status_code != 200:
-            debug_print(f"Stats API hatası: {r.status_code} - {r.text}")
+            debug_print(f"Stats API hatası: {r.status_code}")
             return {"win_rate": 50, "avg_goals": 1.5, "draw_rate": 30}
         
         data = r.json()
         
-        # API response kontrolü
         if "errors" in data and data["errors"]:
-            debug_print(f"API error: {data['errors']}")
             return {"win_rate": 50, "avg_goals": 1.5, "draw_rate": 30}
             
         response = data.get("response")
         if not response:
-            debug_print(f"Boş response: {data}")
             return {"win_rate": 50, "avg_goals": 1.5, "draw_rate": 30}
             
         played = response.get("fixtures", {}).get("played", {}).get("total", 0)
@@ -71,7 +68,6 @@ def fetch_team_stats(team_id, league_id, season):
         win_rate = min(max(win_rate, 20), 85)
         draw_rate = min(max(draw_rate, 10), 50)
         
-        debug_print(f"Takım {team_id}: win_rate={win_rate}%, avg_goals={avg_goals}")
         return {"win_rate": win_rate, "avg_goals": avg_goals, "draw_rate": draw_rate}
         
     except Exception as e:
@@ -82,7 +78,7 @@ def get_top_games():
     """Bugünkü maçları getir"""
     now = datetime.utcnow()
     start_date = now.strftime("%Y-%m-%d")
-    end_date = (now + timedelta(days=2)).strftime("%Y-%m-%d")  # 2 günlük pencere
+    end_date = (now + timedelta(days=2)).strftime("%Y-%m-%d")
     
     debug_print(f"Tarih aralığı: {start_date} - {end_date}")
     
@@ -90,7 +86,7 @@ def get_top_games():
         "from": start_date,
         "to": end_date,
         "status": "NS",
-        "timezone": "Europe/Istanbul"  # Zaman dilimi ekle
+        "timezone": "Europe/Istanbul"
     }
     
     try:
@@ -104,13 +100,9 @@ def get_top_games():
             return []
         
         data = r.json()
-        debug_print(f"API Response: {json.dumps(data, indent=2)[:500]}...")  # İlk 500 karakter
         
-        # API error kontrolü
         if "errors" in data and data["errors"]:
             debug_print(f"API Errors: {data['errors']}")
-            if "requests" in str(data['errors']).lower():
-                return [{"debug": "API limit aşıldı veya günlük kotanız doldu"}]
             return []
         
         fixtures = data.get("response", [])
@@ -121,7 +113,7 @@ def get_top_games():
         
         games = []
         
-        for i, fixture in enumerate(fixtures[:15]):  # İlk 15 maçı işle
+        for i, fixture in enumerate(fixtures[:15]):
             try:
                 league_info = fixture.get("league", {})
                 teams = fixture.get("teams", {})
@@ -144,11 +136,9 @@ def get_top_games():
                 
                 debug_print(f"Maç {i+1}: {home_name} vs {away_name}")
                 
-                # İstatistikleri al
                 home_stats = fetch_team_stats(home_team["id"], league_id, season)
                 away_stats = fetch_team_stats(away_team["id"], league_id, season)
                 
-                # Rating hesapla
                 hw = home_stats["win_rate"]
                 aw = away_stats["win_rate"]
                 hg = home_stats["avg_goals"]
@@ -156,7 +146,6 @@ def get_top_games():
                 
                 rating = (max(hw, aw) * 0.5) + ((hg + ag) * 15)
                 
-                # Bahis tahminleri
                 if hw > aw + 10:
                     one_x_two = "1"
                 elif aw > hw + 10:
@@ -199,15 +188,12 @@ def get_top_games():
         return []
     except Exception as e:
         debug_print(f"get_top_games hatası: {e}")
-        import traceback
-        debug_print(traceback.format_exc())
         return []
 
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Bugünkü maçları göster"""
     try:
         user_id = update.effective_user.id
-        debug_print(f"/today komutu - User ID: {user_id}, Beklenen: {USER_ID}")
         
         if user_id != USER_ID:
             await update.message.reply_text("⚠️ Bu botu kullanma yetkiniz yok.")
@@ -227,39 +213,35 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Olası nedenler:\n"
                 "• API limiti dolmuş olabilir\n"
                 "• Bugün maç olmayabilir\n"
-                "• API anahtarı geçersiz\n"
-                "• API servisi çalışmıyor"
+                "• API anahtarı geçersiz\n\n"
+                "/test komutu ile API durumunu kontrol edin."
             )
             await update.message.reply_text(debug_msg)
             return
         
-        # Debug için bilgileri logla
-        for game in games:
-            debug_print(f"Oyun: {game['match']}, Rating: {game['rating']}")
-        
-        msg = "⚽ **Bugünün Önerilen Maçları** ⚽\n\n"
+        msg = "⚽ Bugünün Önerilen Maçları ⚽\n\n"
         
         for i, game in enumerate(games, 1):
             msg += (
-                f"**{i}. {game['league']}**\n"
-                f"🤼 **{game['match']}**\n"
+                f"{i}. {game['league']}\n"
+                f"🤼 {game['match']}\n"
                 f"⭐ Puan: {game['rating']}/100\n"
                 f"📊 İstatistik: Ev %{game['home_win']} - %{game['away_win']} Deplasman | Toplam Gol: {game['total_goals']}\n"
-                f"🎯 **Tahminler:**\n"
-                f"• 1X2: **{game['1X2']}**\n"
-                f"• Gol Sayısı: **{game['OverUnder']}**\n"
-                f"• Her İki Takım Gol: **{game['BTTS']}**\n"
+                f"🎯 Tahminler:\n"
+                f"• 1X2: {game['1X2']}\n"
+                f"• Gol Sayısı: {game['OverUnder']}\n"
+                f"• Her İki Takım Gol: {game['BTTS']}\n"
                 f"────────────────────\n\n"
             )
         
         msg += (
-            "⚠️ **Önemli Not:**\n"
+            "⚠️ Önemli Not:\n"
             "• Bu tahminler bilgilendirme amaçlıdır\n"
             "• Kesin sonuç garantisi yoktur\n"
             "• Sorumlu bahis yapınız"
         )
         
-        await update.message.reply_text(msg, parse_mode='Markdown')
+        await update.message.reply_text(msg)
         
     except Exception as e:
         debug_print(f"today komutu hatası: {e}")
@@ -268,41 +250,59 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Test komutu - API bağlantısını kontrol et"""
     if update.effective_user.id != USER_ID:
+        await update.message.reply_text("⚠️ Bu botu kullanma yetkiniz yok.")
         return
     
     debug_print("Test komutu çalıştı")
     
-    # Basit bir API testi
     test_params = {"date": datetime.utcnow().strftime("%Y-%m-%d"), "league": 39}
     
     try:
         r = requests.get(FIXTURES_URL, headers=HEADERS, params=test_params, timeout=10)
         
+        if r.status_code == 200:
+            data = r.json()
+            if "errors" in data and data["errors"]:
+                api_status = f"❌ API Error: {data['errors']}"
+            else:
+                api_status = "✅ API Bağlantısı Çalışıyor"
+        elif r.status_code == 429:
+            api_status = "❌ API Limiti Aşıldı"
+        elif r.status_code == 403:
+            api_status = "❌ API Anahtarı Geçersiz"
+        else:
+            api_status = f"❌ API Error: Status Code {r.status_code}"
+        
         response_text = (
-            f"🔍 **API Test Sonucu**\n\n"
+            f"🔍 API Test Sonucu\n\n"
             f"• Status Code: {r.status_code}\n"
-            f"• API Key Durumu: {'✅ Geçerli' if r.status_code == 200 else '❌ Geçersiz'}\n"
+            f"• API Durumu: {api_status}\n"
             f"• Bot Token: {'✅ Mevcut' if BOT_TOKEN else '❌ Eksik'}\n"
             f"• USER_ID: {'✅ ' + str(USER_ID) if USER_ID_STR else '❌ Eksik'}\n"
-            f"• Zaman: {datetime.now().strftime('%H:%M:%S')}"
+            f"• Zaman: {datetime.now().strftime('%H:%M:%S')}\n\n"
+            f"API Key ilk 10 karakter: {API_KEY[:10] if API_KEY else 'EKSİK'}..."
         )
         
-        await update.message.reply_text(response_text, parse_mode='Markdown')
+        await update.message.reply_text(response_text)
         
+    except requests.exceptions.Timeout:
+        await update.message.reply_text("❌ API Timeout - API'ye bağlanılamıyor")
+    except requests.exceptions.ConnectionError:
+        await update.message.reply_text("❌ Bağlantı Hatası - İnternet bağlantısı yok")
     except Exception as e:
         await update.message.reply_text(f"❌ Test hatası: {str(e)}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Başlangıç komutu"""
     welcome_msg = (
-        "🤖 **Futbol Tahmin Botu**\n\n"
+        "🤖 Futbol Tahmin Botu\n\n"
         "Komutlar:\n"
         "• /start - Bu mesajı göster\n"
         "• /today - Bugünün önerilen maçlarını göster\n"
         "• /test - API bağlantı testi\n\n"
         "⚠️ Sadece yetkili kullanıcılar komutları kullanabilir."
     )
-    await update.message.reply_text(welcome_msg, parse_mode='Markdown')
+    await update.message.reply_text(welcome_msg)
 
 def main():
     """Ana fonksiyon"""
