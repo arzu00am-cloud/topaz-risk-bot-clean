@@ -1,18 +1,21 @@
 import os
 import requests
 
-API_KEY = os.getenv("API_FOOTBALL_KEY")
+RAPID_KEY = os.getenv("RAPIDAPI_KEY")
+RAPID_HOST = os.getenv("RAPIDAPI_HOST")
 
-print("API KEY:", API_KEY)
+print("KEY:", RAPID_KEY[:6], "****")
+print("HOST:", RAPID_HOST)
 
 headers = {
-    "x-apisports-key": API_KEY
+    "X-RapidAPI-Key": RAPID_KEY,
+    "X-RapidAPI-Host": RAPID_HOST
 }
 
 r = requests.get(
-    "https://v3.football.api-sports.io/status",
+    "https://api-football-v1.p.rapidapi.com/v3/fixtures?next=5",
     headers=headers
 )
 
-print("STATUS CODE:", r.status_code)
+print("STATUS:", r.status_code)
 print("RESPONSE:", r.text)
