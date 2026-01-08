@@ -3,14 +3,13 @@ import requests
 from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import json
 
 # =========================
-# Railway Environment Variables
+# 1. RAILWAY ENVIRONMENT VARIABLES
 # =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 USER_ID_STR = os.getenv("USER_ID")
-API_KEY = os.getenv("API_KEY")  # ⬅️ İndi bu, RapidAPI-dən aldığınız açar
+SPORTMONKS_API_KEY = os.getenv("API_KEY")  # Sportmonks açarı
 
 if not BOT_TOKEN:
     print("❌ BOT_TOKEN təyin edilməyib!")
@@ -18,163 +17,209 @@ if not BOT_TOKEN:
 if not USER_ID_STR:
     print("❌ USER_ID təyin edilməyib!")
     exit()
-if not API_KEY:
-    print("❌ API_KEY (RapidAPI Açarı) təyin edilməyib!")
+if not SPORTMONKS_API_KEY:
+    print("❌ API_KEY (Sportmonks Açarı) təyin edilməyib!")
     exit()
 
 USER_ID = int(USER_ID_STR)
 
 # =========================
-# RapidAPI vasitəsilə API-Football Konfiqurasiyası
+# 2. SPORTMONKS API KONFİQURASİYASI
 # =========================
+SPORTMONKS_BASE_URL = "https://api.sportmonks.com/v3/football"
+FIXTURES_URL = f"{SPORTMONKS_BASE_URL}/fixtures"
 HEADERS = {
-    "x-rapidapi-key": API_KEY,        # RapidAPI açarı
-    "x-rapidapi-host": "api-football-v1.p.rapidapi.com"
+    "Authorization": f"Bearer {SPORTMONKS_API_KEY}"
 }
-# RapidAPI endpoint ünvanları
-FIXTURES_URL = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
-STATS_URL = "https://api-football-v1.p.rapidapi.com/v3/teams/statistics"
 
-# =========================
-# Köməkçi Funksiyalar
-# =========================
 def debug_print(*args):
     print(f"[DEBUG] {datetime.now().strftime('%H:%M:%S')}:", *args)
 
-def get_current_season():
-    """
-    Cari futbol mövsümünü qaytarır.
-    QEYD: Əgər RapidAPI planınız 2025 mövsümünə icazə verirsə,
-    birbaşa 2025 qaytara bilərsiniz. Məsələn: return 2025
-    """
-    now = datetime.now()
-    current_year = now.year
-    current_month = now.month
-    # Futbol mövsümü adətən Avqustdan başlayır
-    season = current_year if current_month >= 8 else current_year - 1
-    
-    # ⚠️ BURANI YOXLAYIN: Əgər testləriniz 2025 üçün işləyirsə, aşağıdakı sətri aktivləşdirin.
-    # season = 2025
-    debug_print(f"Hesablanmış mövsüm: {season}")
-    return season
-
-def fetch_team_stats(team_id, league_id, season):
-    """Komanda statistikasını RapidAPI-dən alır."""
-    try:
-        params = {"team": team_id, "league": league_id, "season": season}
-        r = requests.get(STATS_URL, headers=HEADERS, params=params, timeout=10)
-        if r.status_code != 200:
-            debug_print(f"Stats API səhvi: {r.status_code}")
-            return {"win_rate": 50, "avg_goals": 1.5}
-        data = r.json()
-        if not data.get("response"):
-            return {"win_rate": 50, "avg_goals": 1.5}
-        resp = data["response"]
-        played = resp["fixtures"]["played"]["total"]
-        wins = resp["fixtures"]["wins"]["total"]
-        goals = resp["goals"]["for"]["total"]["total"]
-        win_rate = int((wins / played) * 100) if played else 50
-        avg_goals = goals / played if played else 1.5
-        return {"win_rate": win_rate, "avg_goals": avg_goals}
-    except Exception as e:
-        debug_print(f"fetch_team_stats səhvi: {e}")
-        return {"win_rate": 50, "avg_goals": 1.5}
-
-def calculate_bets(home_stats, away_stats):
-    """Proqnozları hesablayır."""
-    hw, aw = home_stats["win_rate"], away_stats["win_rate"]
-    if hw > aw + 15:
-        one_x_two = "1"
-    elif aw > hw + 15:
-        one_x_two = "2"
-    elif abs(hw - aw) < 10:
-        one_x_two = "X"
-    else:
-        one_x_two = "1" if hw > aw else "2"
-    total_goals = home_stats["avg_goals"] + away_stats["avg_goals"]
-    over_under = "Over 2.5" if total_goals >= 2.5 else "Under 2.5"
-    btts = "Yes" if home_stats["avg_goals"] > 0.8 and away_stats["avg_goals"] > 0.8 else "No"
-    chance = max(hw, aw)
-    return one_x_two, over_under, btts, chance
-
 def get_top_games():
-    """Günün top oyunlarını RapidAPI-dən alır."""
-    now = datetime.utcnow()
-    start_date = now.strftime("%Y-%m-%d")
-    end_date = (now + timedelta(days=2)).strftime("%Y-%m-%d")
-    season = get_current_season()  # Cari mövsüm
+    """Sportmonks API-dən BÜTÜN gələcək oyunları gətirir (vaxt məhdudiyyətisiz)."""
     
+    # ✅ ƏSAS DƏYİŞİKLİK: VAXT FİLTRİ SİLİNDİ
+    # İndi API-dən sadəcə gələcək oyunları soruşuruq
     params = {
-        "from": start_date,
-        "to": end_date,
-        "status": "NS",
-        "season": season  # ⬅️ Mövsüm parametri əlavə edildi
+        "include": "participants;league",  # Komanda və liqa məlumatları
+        "filters[status][eq]": "NS",      # Yalnız "Not Started" (başlamamış) oyunlar
+        "per_page": 30,                   # Daha çox oyun götürək
+        "sort": "starting_at"             # Başlama vaxtına görə sırala
     }
+    
     try:
-        debug_print("RapidAPI sorğusu göndərilir...")
-        r = requests.get(FIXTURES_URL, headers=HEADERS, params=params, timeout=15)
-        debug_print(f"API Cavab Statusu: {r.status_code}")
-        if r.status_code != 200:
+        debug_print(f"Sportmonks API sorğusu (vaxt məhdudiyyətisiz)...")
+        
+        response = requests.get(FIXTURES_URL, headers=HEADERS, params=params, timeout=15)
+        debug_print(f"API Status: {response.status_code}")
+        
+        if response.status_code != 200:
+            debug_print(f"API səhvi: {response.text[:200]}")
             return []
-        data = r.json()
-        if "errors" in data and data["errors"]:
-            debug_print(f"API Səhvləri: {data['errors']}")
+        
+        data = response.json()
+        fixtures = data.get("data", [])
+        
+        if not fixtures:
+            debug_print("Heç bir gələcək oyun tapılmadı.")
             return []
-        fixtures = data.get("response", [])
-        debug_print(f"Toplam {len(fixtures)} oyun tapıldı")
+        
+        debug_print(f"Ümumi {len(fixtures)} gələcək oyun tapıldı")
+        
         games = []
-        for g in fixtures[:10]:  # İlk 10 oyunu işlə
-            league = g["league"]
-            league_id = league["id"]
-            season = league["season"]
-            home = g["teams"]["home"]
-            away = g["teams"]["away"]
-            home_stats = fetch_team_stats(home["id"], league_id, season)
-            away_stats = fetch_team_stats(away["id"], league_id, season)
-            one_x_two, over_under, btts, chance = calculate_bets(home_stats, away_stats)
-            games.append({
-                "league": league["name"],
-                "match": f"{home['name']} vs {away['name']}",
-                "chance": chance,
-                "1X2": one_x_two,
-                "OverUnder": over_under,
-                "BTTS": btts
-            })
-        games.sort(key=lambda x: x["chance"], reverse=True)
-        return games[:5]
+        for fixture in fixtures:
+            try:
+                # Liqa məlumatları
+                league = fixture.get("league", {})
+                league_name = league.get("name", "N/A")
+                league_id = league.get("id", 0)
+                
+                # Komanda məlumatları
+                participants = fixture.get("participants", [])
+                home_team = next((p for p in participants if p.get("meta", {}).get("location") == "home"), {})
+                away_team = next((p for p in participants if p.get("meta", {}).get("location") == "away"), {})
+                
+                home_name = home_team.get("name", "Ev Sahibi")
+                away_name = away_team.get("name", "Səfər")
+                match_name = f"{home_name} vs {away_name}"
+                
+                # Başlama vaxtı
+                start_time = fixture.get("starting_at", "")
+                if start_time:
+                    try:
+                        start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                        time_display = start_dt.strftime("%d.%m %H:%M")  # Gün.Ay Saat:Dəqiqə formatında
+                        days_until = (start_dt.date() - datetime.now().date()).days
+                    except:
+                        time_display = start_time[5:16] if len(start_time) > 16 else start_time
+                        days_until = 0
+                else:
+                    time_display = "Təyin edilməyib"
+                    days_until = 0
+                
+                # REYTİNQ HESABLANMASI (nümunə - öz məntiqinizlə dəyişin)
+                base_rating = 40
+                
+                # Məşhur liqalara daha yüksək reytinq
+                popular_leagues = ["Premier League", "La Liga", "Bundesliga", "Serie A", "Champions League"]
+                if any(league in league_name for league in popular_leagues):
+                    base_rating += 25
+                
+                # Tez başlayacaq oyunlara daha yüksək reytinq
+                if days_until <= 7:
+                    base_rating += min(20, 25 - days_until * 3)
+                
+                games.append({
+                    "league": league_name,
+                    "match": match_name,
+                    "time": time_display,
+                    "rating": min(base_rating, 95),
+                    "home": home_name,
+                    "away": away_name,
+                    "days_until": days_until
+                })
+                
+            except Exception as e:
+                debug_print(f"Oyun emal səhvi: {e}")
+                continue
+        
+        # Reytinqə görə sırala və ilk 8-i götür (çünki daha çox oyun var)
+        games.sort(key=lambda x: x["rating"], reverse=True)
+        return games[:8]  # 8 oyun göstər
+        
+    except requests.exceptions.Timeout:
+        debug_print("API sorğusu zaman aşımına uğradı")
+        return []
     except Exception as e:
-        debug_print(f"get_top_games səhvi: {e}")
+        debug_print(f"Ümumi xəta: {e}")
         return []
 
 # =========================
-# Telegram Bot Komandaları
+# 3. TELEGRAM BOT KOMANDALARI
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 Bot işləyir! /today yazaraq bugünkü oyunları görə bilərsiniz.")
-
-async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != USER_ID:
         return
-    await update.message.reply_text("📊 Oyunlar təhlil edilir...")
-    games = get_top_games()
-    if not games:
-        await update.message.reply_text("❌ Bu gün üçün oyun tapılmadı.")
+    await update.message.reply_text(
+        "🤖 Futbol Proqnoz Botu (Vaxt Məhdudiyyətisiz)\n"
+        "Əmrlər:\n"
+        "/start - Bu mesaj\n"
+        "/matches - Bütün gələcək oyunlar\n\n"
+        "⚠️ Diqqət: Bu test versiyasıdır."
+    )
+
+async def matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != USER_ID:
         return
-    msg = "⚽ Bugünün Top 5 Oyunu:\n\n"
-    for g in games:
-        msg += f"{g['league']}\n{g['match']}\nEhtimal: {g['chance']}%\n1X2: {g['1X2']} | Qol: {g['OverUnder']} | Hər iki komanda qol vurarmı: {g['BTTS']}\n\n"
-    await update.message.reply_text(msg)
+    
+    await update.message.reply_text("🔍 Bütün gələcək oyunlar gətirilir...")
+    
+    games = get_top_games()
+    
+    if not games:
+        await update.message.reply_text(
+            "❌ Heç bir gələcək oyun tapılmadı.\n"
+            "Ola bilər ki:\n"
+            "• Pulsuz plan bu liqaları əhatə etmir\n"
+            "• API-də heç bir planlaşdırılmış oyun yoxdur\n"
+            "• API açarı düzgün deyil"
+        )
+        return
+    
+    # Oyunları günlərə görə qruplaşdır
+    games_by_day = {}
+    for game in games:
+        day_key = game['time'].split()[0] if ' ' in game['time'] else 'Digər'
+        if day_key not in games_by_day:
+            games_by_day[day_key] = []
+        games_by_day[day_key].append(game)
+    
+    message = "⚽ GƏLƏCƏK OYUNLAR (Reytinqə görə sıralanıb):\n\n"
+    
+    for day, day_games in games_by_day.items():
+        message += f"📅 **{day}**\n"
+        for i, game in enumerate(day_games, 1):
+            message += (
+                f"  {i}. {game['league']}\n"
+                f"     🕒 {game['time']} | ⭐ {game['rating']}%\n"
+                f"     🤼 {game['match']}\n"
+            )
+        message += "  ─────────────────\n"
+    
+    message += (
+        f"\n📊 **Ümumi:** {len(games)} oyun tapıldı\n"
+        "⚠️ **Xəbərdarlıq:** Bu reytinq sadəcə nümunədir.\n"
+        "Həqiqi proqnoz üçün statistikalar lazımdır."
+    )
+    
+    # Telegram mesaj limiti (4096 simvol) üçün kəsim
+    if len(message) > 4000:
+        message = message[:3900] + "\n[...mesaj qısaldıldı]"
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
 
 # =========================
-# Əsas Proqram
+# 4. BOTU BAŞLAT
 # =========================
 def main():
-    debug_print("Bot başladılır...")
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("today", today))
-    debug_print("Bot uğurla başladıldı!")
-    app.run_polling(drop_pending_updates=True)
+    debug_print("=" * 50)
+    debug_print("Bot başladılır (Vaxt Məhdudiyyətisiz)...")
+    debug_print(f"USER_ID: {USER_ID}")
+    debug_print(f"API_KEY ilk 10 simvol: {SPORTMONKS_API_KEY[:10]}...")
+    
+    try:
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("matches", matches))  # Əmr adı dəyişdi: /today -> /matches
+        
+        debug_print("✅ Bot uğurla başladıldı!")
+        debug_print("Komanda: /matches")
+        debug_print("=" * 50)
+        
+        app.run_polling(drop_pending_updates=True)
+        
+    except Exception as e:
+        debug_print(f"❌ Bot başlatma xətası: {e}")
 
 if __name__ == "__main__":
     main()
